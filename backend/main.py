@@ -3,12 +3,15 @@ from fastapi.middleware.cors import CORSMiddleware
 import joblib
 import pandas as pd
 import os
-import download_data
+
+# -------------------------------------------------
+# APP INIT
+# -------------------------------------------------
 
 app = FastAPI()
 
 # -------------------------------------------------
-# CORS (allow frontend)
+# CORS
 # -------------------------------------------------
 
 app.add_middleware(
@@ -20,7 +23,7 @@ app.add_middleware(
 )
 
 # -------------------------------------------------
-# Paths
+# PATHS
 # -------------------------------------------------
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -33,22 +36,49 @@ POLLUTION_MODEL_PATH = os.path.join(MODELS_DIR, "pollution_model.pkl")
 DATA_PATH = os.path.join(DATA_DIR, "final_dataset.csv")
 
 # -------------------------------------------------
-# SAFE MODEL LOADING (IMPORTANT FIX)
+# STEP 1 — DOWNLOAD FILES (FORCE EXECUTION)
 # -------------------------------------------------
 
-traffic_model = None
-pollution_model = None
+print("📥 Starting file download...")
+
+try:
+    import download_data
+    print("✅ Download script executed")
+except Exception as e:
+    print("❌ Download failed:", e)
+
+# -------------------------------------------------
+# STEP 2 — WAIT UNTIL FILES EXIST (CRITICAL FIX)
+# -------------------------------------------------
+
+import time
+
+for i in range(10):  # wait up to ~10 seconds
+    if (
+        os.path.exists(TRAFFIC_MODEL_PATH)
+        and os.path.exists(POLLUTION_MODEL_PATH)
+        and os.path.exists(DATA_PATH)
+    ):
+        print("✅ All files found")
+        break
+    print("⏳ Waiting for files...")
+    time.sleep(1)
+else:
+    raise Exception("❌ Files not downloaded properly")
+
+# -------------------------------------------------
+# STEP 3 — LOAD MODELS SAFELY
+# -------------------------------------------------
 
 try:
     traffic_model = joblib.load(TRAFFIC_MODEL_PATH)
     pollution_model = joblib.load(POLLUTION_MODEL_PATH)
     print("✅ Models loaded successfully")
-
 except Exception as e:
-    print("❌ Error loading models:", e)
+    raise Exception(f"❌ Model loading failed: {e}")
 
 # -------------------------------------------------
-# Health Check
+# HEALTH CHECK
 # -------------------------------------------------
 
 @app.get("/")
@@ -56,14 +86,11 @@ def home():
     return {"message": "SmartSimulation Backend Running"}
 
 # -------------------------------------------------
-# Prediction API
+# PREDICTION API
 # -------------------------------------------------
 
 @app.get("/predict")
 def predict(year: int, month: int, day: int, hour: int, weekday: int):
-
-    if traffic_model is None or pollution_model is None:
-        return {"error": "Models not loaded properly"}
 
     try:
         traffic_input = pd.DataFrame({
@@ -95,7 +122,7 @@ def predict(year: int, month: int, day: int, hour: int, weekday: int):
         return {"error": str(e)}
 
 # -------------------------------------------------
-# Dashboard Data API
+# DASHBOARD DATA API
 # -------------------------------------------------
 
 @app.get("/data")
@@ -104,26 +131,20 @@ def get_data():
     try:
         df = pd.read_csv(DATA_PATH)
 
-        # Convert datetime safely
         df["Datetime"] = pd.to_datetime(df["Datetime"], errors="coerce")
-
         df["hour"] = df["Datetime"].dt.hour
 
-        # Rename column safely
         if "PM2.5" in df.columns:
             df = df.rename(columns={"PM2.5": "pm25"})
 
-        # Create traffic if missing
         if "traffic_flow" not in df.columns:
             df["traffic_flow"] = df["pm25"] * 3
 
-        # Clean data
         df = df.dropna(subset=["pm25", "traffic_flow", "hour"])
 
-        # Group properly
         df = df.groupby("hour")[["traffic_flow", "pm25"]].mean().reset_index()
 
-        # Ensure full 0–23 hours (IMPORTANT FIX for your chart issue)
+        # FIX: Ensure full 24 hours
         full_hours = pd.DataFrame({"hour": list(range(24))})
         df = pd.merge(full_hours, df, on="hour", how="left")
 
