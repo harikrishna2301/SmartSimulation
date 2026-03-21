@@ -4,3 +4,5 @@ dist
 *.csv
 __pycache__
 .env
+models/
+data/
