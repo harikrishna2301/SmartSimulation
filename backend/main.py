@@ -1,10 +1,10 @@
+import download_data
+download_data.download_if_missing()
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import joblib
 import pandas as pd
 import os
-import download_data
-download_data.download_if_missing()
 
 app = FastAPI()
 
